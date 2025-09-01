@@ -3,7 +3,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../App';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config/api';
-import { FaTicketAlt, FaCheckCircle, FaExclamationTriangle, FaInfoCircle, FaUserCheck, FaCheckSquare } from 'react-icons/fa';
+import { FaTicketAlt, FaCheckCircle, FaExclamationTriangle, FaInfoCircle, FaUserCheck, FaCheckSquare, FaFilter, FaTimes } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
 // Custom Modal Component
@@ -35,7 +35,8 @@ const CustomModal = ({ title, message, type, onConfirm, onCancel, showCancel = f
 
 function SubAdminManageTickets() {
   const { auth } = useContext(AuthContext);
-  const [tickets, setTickets] = useState([]);
+  const [allTickets, setAllTickets] = useState([]);
+  const [filteredTickets, setFilteredTickets] = useState([]);
   const [directorateResolvers, setDirectorateResolvers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -43,6 +44,11 @@ function SubAdminManageTickets() {
   const [selectedResolverForAssignment, setSelectedResolverForAssignment] = useState({});
   const [solutionInput, setSolutionInput] = useState({});
   const [showResolveForm, setShowResolveForm] = useState({});
+  
+  // Filter states
+  const [priorityFilter, setPriorityFilter] = useState('all');
+  const [showFilters, setShowFilters] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
 
   // Custom modal states
   const [showModal, setShowModal] = useState(false);
@@ -66,6 +72,27 @@ function SubAdminManageTickets() {
     fetchSubAdminTickets();
   }, [auth.isAuthenticated, auth.user?.id, auth.token, navigate]);
 
+  // Apply filters when tickets or filter values change
+  useEffect(() => {
+    applyFilters();
+  }, [allTickets, priorityFilter, statusFilter]);
+
+  const applyFilters = () => {
+    let filtered = [...allTickets];
+
+    // Apply priority filter
+    if (priorityFilter !== 'all') {
+      filtered = filtered.filter(ticket => ticket.priority === priorityFilter);
+    }
+
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(ticket => ticket.status === statusFilter);
+    }
+
+    setFilteredTickets(filtered);
+  };
+
   const fetchSubAdminTickets = async () => {
     setLoading(true);
     setError('');
@@ -77,14 +104,12 @@ function SubAdminManageTickets() {
       const ticketsRes = await axios.get(`${API_BASE_URL}/tickets/index.php?submitted_to=${auth.user.id}`, { headers });
 
       if (ticketsRes.data.status === 'success') {
-        // Filter out resolved tickets
-        const relevantTickets = ticketsRes.data.tickets.filter(ticket => 
-          ticket.status !== 'resolved'
-        );
-        setTickets(relevantTickets || []);
+        setAllTickets(ticketsRes.data.tickets || []);
+        setFilteredTickets(ticketsRes.data.tickets || []);
       } else {
         setError(ticketsRes.data.message || 'Failed to fetch tickets.');
-        setTickets([]);
+        setAllTickets([]);
+        setFilteredTickets([]);
       }
 
       // Fetch resolvers within THIS sub-admin's directorate
@@ -102,7 +127,8 @@ function SubAdminManageTickets() {
     } catch (err) {
       console.error("Error fetching sub-admin data:", err);
       setError(err.response?.data?.message || 'An error occurred while fetching data.');
-      setTickets([]);
+      setAllTickets([]);
+      setFilteredTickets([]);
       setDirectorateResolvers([]);
     } finally {
       setLoading(false);
@@ -175,7 +201,7 @@ function SubAdminManageTickets() {
             setSuccess(`Ticket ${ticketId} resolved successfully.`);
             
             // Send notification to user
-            const ticket = tickets.find(t => t.id === ticketId);
+            const ticket = allTickets.find(t => t.id === ticketId);
             if (ticket && ticket.submitted_by) {
               await axios.post(`${API_BASE_URL}/notifications/index.php`, {
                 message: `Your ticket #${ticketId} has been resolved. Solution: ${solution}`,
@@ -202,6 +228,18 @@ function SubAdminManageTickets() {
     );
   };
 
+  const clearFilters = () => {
+    setPriorityFilter('all');
+    setStatusFilter('all');
+  };
+
+  const getFilterSummary = () => {
+    const filters = [];
+    if (priorityFilter !== 'all') filters.push(`Priority: ${priorityFilter}`);
+    if (statusFilter !== 'all') filters.push(`Status: ${statusFilter}`);
+    return filters.join(', ') || 'No filters applied';
+  };
+
   if (loading) return <div className="loading-spinner"><div className="spinner"></div>Loading tickets submitted to you...</div>;
 
   return (
@@ -212,6 +250,56 @@ function SubAdminManageTickets() {
           Tickets Submitted to Me ({auth.user?.username || 'N/A'})
         </h2>
         <p className="page-subtitle">Manage tickets submitted directly to you</p>
+        
+        <div className="filter-section">
+          <button 
+            onClick={() => setShowFilters(!showFilters)} 
+            className="filter-toggle-btn"
+          >
+            <FaFilter /> {showFilters ? 'Hide Filters' : 'Show Filters'}
+          </button>
+          
+          {showFilters && (
+            <div className="filters-panel">
+              <div className="filter-group">
+                <label>Priority:</label>
+                <select 
+                  value={priorityFilter} 
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className="filter-select"
+                >
+                  <option value="all">All Priorities</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+              
+              <div className="filter-group">
+                <label>Status:</label>
+                <select 
+                  value={statusFilter} 
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="filter-select"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="open">Open</option>
+                  <option value="assigned">Assigned</option>
+                  <option value="resolved">Resolved</option>
+                </select>
+              </div>
+              
+              <button onClick={clearFilters} className="clear-filters-btn">
+                <FaTimes /> Clear Filters
+              </button>
+            </div>
+          )}
+          
+          <div className="filter-summary">
+            {getFilterSummary()} | Showing {filteredTickets.length} of {allTickets.length} tickets
+          </div>
+        </div>
       </div>
 
       {error && <div className="error-message">{error}</div>}
@@ -231,14 +319,16 @@ function SubAdminManageTickets() {
             </tr>
           </thead>
           <tbody>
-            {tickets.length === 0 ? (
+            {filteredTickets.length === 0 ? (
               <tr>
                 <td colSpan="7" className="no-data">
-                  No tickets currently submitted to you.
+                  {allTickets.length === 0 
+                    ? 'No tickets currently submitted to you.' 
+                    : 'No tickets match the current filters.'}
                 </td>
               </tr>
             ) : (
-              tickets.map(ticket => (
+              filteredTickets.map(ticket => (
                 <tr key={ticket.id} className="ticket-row">
                   <td className="ticket-id">{ticket.id}</td>
                   <td className="ticket-subject">{ticket.subject}</td>

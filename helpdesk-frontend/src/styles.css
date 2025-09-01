@@ -1126,3 +1126,95 @@ tr:hover {
     border: 1px solid var(--gray-light);
   }
 }
+
+
+
+/* filter SUBADMIN TICKETS */
+/* Filter Section Styles */
+.filter-section {
+  margin: 15px 0;
+  padding: 15px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.filter-toggle-btn {
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.filter-toggle-btn:hover {
+  background: #5a6268;
+}
+
+.filters-panel {
+  margin-top: 15px;
+  padding: 15px;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  align-items: end;
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-group label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #495057;
+}
+
+.filter-select {
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.clear-filters-btn {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  height: fit-content;
+}
+
+.clear-filters-btn:hover {
+  background: #c82333;
+}
+
+.filter-summary {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #6c757d;
+  font-style: italic;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .filters-panel {
+    grid-template-columns: 1fr;
+  }
+}
