@@ -204,6 +204,7 @@ public function updatePassword() {
     return $stmt->execute();
 }
 
+
     public function updateResetExpiry($expiryTime) {
         $query = "UPDATE " . $this->table . " SET reset_expiry = :reset_expiry, updated_at = GETDATE() WHERE id = :id";
         $stmt = $this->conn->prepare($query);

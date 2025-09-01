@@ -1,10 +1,10 @@
-// App.jsx
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, createContext } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import './styles.css';
 
 // Components
 import Login from './components/Login';
+import ProtectedRoute from './components/ProtectedRoute';
 import AdminDashboard from './components/admin/AdminDashboard';
 import UserDashboard from './components/user/UserDashboard';
 import ResolverDashboard from './components/resolver/ResolverDashboard';
@@ -22,39 +22,21 @@ import DashboardHome from './components/DashboardHome';
 import ResolverNewTicket from './components/resolver/ResolverNewTicket.jsx';
 import SubAdminTickets from './components/subadmin/SubadminTickets.jsx';
 import ResolverTicket from './components/resolver/MysubmittedTicket.jsx';
-export const AuthContext = React.createContext();
+import ManageDirectorates from './components/admin/ManageDirectorates.jsx';
+import ManageRoles from './components/admin/ManageRoles.jsx';
 
-// Role utility (assuming it exists and includes ADMIN_ROLES)
+// Role utility
 import { ADMIN_ROLES, isAdminRole } from './utils/roleUtils'; 
 
-// Protected Route Component
-const ProtectedRoute = ({ children, requiredRole }) => {
-  const { auth } = React.useContext(AuthContext);
-  const location = useLocation();
-  
-  if (!auth.isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-  
-  const requiredRolesArray = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-  
-  // Check if the user's role is included in the required roles
-  if (requiredRolesArray.length > 0 && !requiredRolesArray.includes(auth.user.role)) {
-    // If not authorized, redirect to their default dashboard
-    if (auth.user.role === 'admin') {
-      return <Navigate to="/admin" replace />;
-    } else if (isAdminRole(auth.user.role)) { // Check for any sub-admin role
-      return <Navigate to="/subadmin" replace />; // Redirect sub-admins to their dashboard
-    } else if (auth.user.role === 'resolver') {
-      return <Navigate to="/resolver" replace />;
-    } else if (auth.user.role === 'user') {
-      return <Navigate to="/dashboard" replace />;
-    }
-    // Fallback if role is not recognized or not handled
-    return <Navigate to="/login" replace />; 
-  }
-  
-  return children;
+// Create Auth Context
+export const AuthContext = createContext();
+
+// Helper function for role-based redirection
+const getRedirectPath = (role) => {
+  if (role === 'admin') return '/admin';
+  if (isAdminRole(role)) return '/subadmin';
+  if (role === 'resolver') return '/resolver';
+  return '/dashboard';
 };
 
 function App() {
@@ -68,20 +50,23 @@ function App() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userData = localStorage.getItem('user'); 
+    const currentRole = localStorage.getItem('currentRole');
     
     if (token && userData) {
       try {
         const user = JSON.parse(userData);
         setAuth({
           isAuthenticated: true,
-          user: user,
-          token: token,
+          user: {
+            ...user,
+            currentRole: currentRole || user.role
+          },
+          token,
           loading: false
         });
       } catch (error) {
         console.error("Failed to parse user data from localStorage:", error);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user'); 
+        localStorage.clear();
         setAuth({ isAuthenticated: false, user: null, token: null, loading: false });
       }
     } else {
@@ -94,15 +79,17 @@ function App() {
     localStorage.setItem('user', JSON.stringify(userData)); 
     setAuth({
       isAuthenticated: true,
-      user: userData,
-      token: token,
+      user: {
+        ...userData,
+        currentRole: userData.role
+      },
+      token,
       loading: false
     });
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user'); 
+    localStorage.clear();
     setAuth({
       isAuthenticated: false,
       user: null,
@@ -111,15 +98,28 @@ function App() {
     });
   };
 
+  const switchRole = (role) => {
+    localStorage.setItem('currentRole', role);
+    setAuth(prev => ({
+      ...prev,
+      user: {
+        ...prev.user,
+        currentRole: role
+      }
+    }));
+  };
+
   if (auth.loading) {
     return <div className="loading">Loading...</div>;
   }
 
+  const effectiveRole = auth.user?.currentRole || auth.user?.role;
+
   return (
-    <AuthContext.Provider value={{ auth, login, logout }}>
+    <AuthContext.Provider value={{ auth, login, logout, switchRole }}>
       <Router>
         <Routes>
-          {/* Public routes - Login page always renders Login component */}
+          {/* Public routes */}
           <Route path="/login" element={<Login />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ForgotPassword />} /> 
@@ -135,7 +135,7 @@ function App() {
             <Route path="my-tickets" element={<MyTickets />} />
           </Route>
           
-          {/* Protected routes - Admin (only top-level 'admin' role) */}
+          {/* Protected routes - Admin */}
           <Route path="/admin" element={
             <ProtectedRoute requiredRole="admin"> 
               <AdminDashboard />
@@ -143,21 +143,23 @@ function App() {
           }>
             <Route index element={<DashboardHome />} />
             <Route path="users" element={<ManageUsers />} />
-            <Route path="tickets" element={<ManageTickets />} /> {/* This is for admin reports now */}
+            <Route path="tickets" element={<ManageTickets />} />
             <Route path="add-user" element={<AddUser />} /> 
+            <Route path="roles" element={<ManageRoles />} />
+            <Route path="directorates" element={<ManageDirectorates />} />
           </Route>
           
-          {/* Protected routes - Sub-Admin (all roles in ADMIN_ROLES except 'admin') */}
+          {/* Protected routes - Sub-Admin */}
           <Route path="/subadmin" element={
-            <ProtectedRoute requiredRole={ADMIN_ROLES.filter(role => role !== 'admin')}> {/* Filter out 'admin' from ADMIN_ROLES */}
+            <ProtectedRoute requiredRole={ADMIN_ROLES.filter(role => role !== 'admin')}>
               <SubAdminDashboard />
             </ProtectedRoute>
           }>
-            <Route index element={<DashboardHome />} /> {/* Can be a subadmin-specific home or general */}
-            <Route path="my-assigned-tickets" element={<SubAdminManageTickets />} /> {/* NEW: SubAdmin's ticket management */}
-            <Route path="submit-ticket" element={<NewTicket isSubAdmin={true} />} /> {/* NEW: Re-use NewTicket for sub-admins */}
-            <Route path="change-password" element={<SubAdminDashboard isPasswordChange={true} />} /> {/* Placeholder for password change component */}
-             <Route path="my-tickets" element={<SubAdminTickets />} />
+            <Route index element={<DashboardHome />} />
+            <Route path="my-assigned-tickets" element={<SubAdminManageTickets />} />
+            <Route path="submit-ticket" element={<NewTicket isSubAdmin={true} />} />
+            <Route path="change-password" element={<SubAdminDashboard isPasswordChange={true} />} />
+            <Route path="my-tickets" element={<SubAdminTickets />} />
           </Route>
 
           {/* Protected routes - Resolver */}
@@ -167,30 +169,23 @@ function App() {
             </ProtectedRoute>
           }>
             <Route index element={<DashboardHome />} />
-         
-           <Route path="submit-ticket" element={<ResolverNewTicket />} />
+            <Route path="submit-ticket" element={<ResolverNewTicket />} />
             <Route path="assigned" element={<AssignedTickets />} />
             <Route path="resolved" element={<ResolvedTickets />} />
             <Route path="my-tickets" element={<ResolverTicket />} />
           </Route>
           
-          {/* Redirect root path based on authentication/role, defaulting to login */}
+          {/* Redirect root path */}
           <Route path="/" element={
             auth.isAuthenticated ? (
-              auth.user.role === 'admin' ? <Navigate to="/admin" replace /> :
-              isAdminRole(auth.user.role) ? <Navigate to="/subadmin" replace /> : // Redirect sub-admins
-              auth.user.role === 'resolver' ? <Navigate to="/resolver" replace /> :
-              <Navigate to="/dashboard" replace />
+              <Navigate to={getRedirectPath(effectiveRole)} replace />
             ) : <Navigate to="/login" replace />
           } />
           
-          {/* Catch all route - redirects to login if not authenticated, or to appropriate dashboard */}
+          {/* Catch all route */}
           <Route path="*" element={
             auth.isAuthenticated ? (
-              auth.user.role === 'admin' ? <Navigate to="/admin" replace /> :
-              isAdminRole(auth.user.role) ? <Navigate to="/subadmin" replace /> : // Redirect sub-admins
-              auth.user.role === 'resolver' ? <Navigate to="/resolver" replace /> :
-              <Navigate to="/dashboard" replace />
+              <Navigate to={getRedirectPath(effectiveRole)} replace />
             ) : <Navigate to="/login" replace />
           } />
         </Routes>

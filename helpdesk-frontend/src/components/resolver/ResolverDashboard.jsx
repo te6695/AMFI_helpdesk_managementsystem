@@ -1,11 +1,9 @@
-// components/resolver/ResolverDashboard.jsx
 import React, { useState, useEffect, useContext } from 'react';
-import { AuthContext } from '../../App'; // Corrected path
+import { AuthContext } from '../../App';
 import { Link, Outlet, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { API_BASE_URL } from '../../config/api'; // Corrected path
-import { FaBars, FaHome, FaTicketAlt, FaClipboardCheck, FaBell, FaSignOutAlt, FaUserCircle, FaCog, FaPlusCircle } from 'react-icons/fa';
-import { Pie, Bar } from 'react-chartjs-2';
+import { API_BASE_URL } from '../../config/api';
+import { FaBars, FaHome, FaTicketAlt, FaClipboardCheck, FaBell, FaSignOutAlt, FaUserCircle, FaCog, FaPlusCircle, FaTimes } from 'react-icons/fa';
 
 function ResolverDashboard() {
   const { auth, logout } = useContext(AuthContext);
@@ -52,7 +50,8 @@ function ResolverDashboard() {
         axios.get(`${API_BASE_URL}/tickets/index.php?resolved=true&resolver_id=${auth.user.id}`, {
           headers: { Authorization: `Bearer ${auth.token}` }
         }),
-        axios.get(`${API_BASE_URL}/notifications/index.php?user_id=${auth.user.id}`, {
+        // Fetch only unread notifications
+        axios.get(`${API_BASE_URL}/notifications/index.php?user_id=${auth.user.id}&unread=true`, {
           headers: { Authorization: `Bearer ${auth.token}` }
         }),
       ]);
@@ -68,7 +67,23 @@ function ResolverDashboard() {
     }
   };
 
-  //change password
+  // Function to fetch only unread notifications
+  const fetchUnreadNotifications = async () => {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/notifications/index.php?user_id=${auth.user.id}&unread=true`,
+        { headers: { Authorization: `Bearer ${auth.token}` } }
+      );
+      
+      if (response.data.status === 'success') {
+        setNotifications(response.data.notifications || []);
+      }
+    } catch (err) {
+      console.error('Error fetching unread notifications:', err);
+    }
+  };
+
+  // Change password
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPasswordMessage('');
@@ -115,14 +130,35 @@ function ResolverDashboard() {
     }
   };
 
-  // Function to mark all notifications as read
-  const markAllAsRead = async () => {
+  // Function to mark a single notification as read
+  const markNotificationAsRead = async (notificationId) => {
     try {
-      await axios.post(`${API_BASE_URL}/notifications/index.php`, { userId: auth.user.id }, {
+      await axios.put(`${API_BASE_URL}/notifications/index.php?id=${notificationId}`, {}, {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
-      // Update the local state to reflect changes
-      setNotifications(notifications.map(n => ({ ...n, is_read: '1' })));
+      
+      // Remove the notification from the local state (only unread notifications are shown)
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
+    }
+  };
+
+  // Function to mark all notifications as read and collapse the dropdown
+  const markAllAsRead = async () => {
+    try {
+      await axios.post(`${API_BASE_URL}/notifications/index.php`, { 
+        userId: auth.user.id,
+        markAllRead: true 
+      }, {
+        headers: { Authorization: `Bearer ${auth.token}` }
+      });
+      
+      // Clear all notifications from the local state
+      setNotifications([]);
+      
+      // Collapse the notification dropdown after marking as read
+      setShowNotifications(false);
     } catch (err) {
       console.error('Failed to mark notifications as read:', err);
     }
@@ -165,17 +201,17 @@ function ResolverDashboard() {
               </Link>
             </li>
              <li>
-                          <Link to="/resolver/my-tickets" className={`sidebar-link ${activeTab === 'my-tickets' ? 'active' : ''}`} onClick={() => setActiveTab('my-tickets')}>
-                            <FaTicketAlt /> <span>View My Tickets</span>
-                          </Link>
-                        </li>
+              <Link to="/resolver/my-tickets" className={`sidebar-link ${activeTab === 'my-tickets' ? 'active' : ''}`} onClick={() => setActiveTab('my-tickets')}>
+                <FaTicketAlt /> <span>View My Tickets</span>
+              </Link>
+            </li>
             <li>
-              <button onClick={() => setShowChangePassword(true)} className="sidebar-link">
+              <button onClick={() => setShowChangePassword(true)} className="sidebar-link-button">
                 <FaCog /> <span>Change Password</span>
               </button>
             </li>
             <li>
-              <button onClick={logout} className="sidebar-link">
+              <button onClick={logout} className="sidebar-link-button">
                 <FaSignOutAlt /> <span>Logout</span>
               </button>
             </li>
@@ -190,26 +226,51 @@ function ResolverDashboard() {
           <div className="notification-container">
             <div className="notification-icon" onClick={() => setShowNotifications(!showNotifications)}>
               <FaBell />
-              {notifications.filter(n => n.is_read === '0').length > 0 && (
+              {notifications.length > 0 && (
                 <span className="notification-badge">
-                  {notifications.filter(n => n.is_read === '0').length}
+                  {notifications.length}
                 </span>
               )}
             </div>
             {showNotifications && (
               <div className="notification-dropdown">
-                <h4>Notifications</h4>
-                {notifications.length > 0 ? (
-                  <>
-                    {notifications.map((n) => (
-                      <div key={n.id} className={`notification-item ${n.is_read === '0' ? 'unread' : ''}`}>
-                        <p>{n.message}</p>
-                      </div>
-                    ))}
-                    <button onClick={markAllAsRead} className="mark-read-btn">Mark All as Read</button>
-                  </>
+                <div className="notification-header">
+                  <h4>Notifications</h4>
+                  <button onClick={() => setShowNotifications(false)} className="close-notifications">
+                    <FaTimes />
+                  </button>
+                </div>
+                {notifications.length === 0 ? (
+                  <p className="no-notifications">No new notifications</p>
                 ) : (
-                  <p>No new notifications.</p>
+                  <>
+                    <div className="notification-list">
+                      {notifications.map((notification) => (
+                        <div key={notification.id} className="notification-item unread">
+                          <div className="notification-content">
+                            <p>{notification.message}</p>
+                            <span className="notification-time">
+                              {new Date(notification.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="notification-actions">
+                            <button 
+                              onClick={() => markNotificationAsRead(notification.id)}
+                              className="mark-read-btn"
+                              title="Mark as read"
+                            >
+                              ✓
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="notification-footer">
+                      <button onClick={markAllAsRead} className="mark-all-read-btn">
+                        Mark All as Read
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -226,7 +287,6 @@ function ResolverDashboard() {
           {activeTab === 'dashboard' && (
             <div className="dashboard-overview card">
               <h2>Resolver Overview</h2>
-
 
               <div className="stats-cards">
                 <div className="stat-card card">

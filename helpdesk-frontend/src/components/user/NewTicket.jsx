@@ -214,6 +214,8 @@ function NewTicket() {
           <textarea
             id="description"
             name="description"
+            placeholder='Describe your issue detail...'
+
             value={formData.description}
             onChange={handleChange}
             rows="5"

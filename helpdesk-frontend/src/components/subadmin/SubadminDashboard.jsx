@@ -4,6 +4,7 @@ import { Link, Outlet, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config/api';
 import { FaBars, FaHome, FaTicketAlt, FaPlusCircle, FaCog, FaBell, FaUserCircle, FaSignOutAlt, FaTimes } from 'react-icons/fa';
+import SubAdminDashboardOverview from './SubAdminDashboardOverview';
 
 function SubAdminDashboard({ isPasswordChange = false }) {
   const { auth, logout } = useContext(AuthContext);
@@ -87,6 +88,7 @@ function SubAdminDashboard({ isPasswordChange = false }) {
       
       // Update local state to mark all as read
       setNotifications(prev => prev.map(n => ({ ...n, is_read: '1' })));
+      setShowNotifications(false);
     } catch (err) {
       console.error("Failed to mark all notifications as read:", err);
     }
@@ -150,6 +152,13 @@ function SubAdminDashboard({ isPasswordChange = false }) {
     }
   };
 
+  const handleCancelPasswordChange = () => {
+    setShowChangePassword(false);
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    setPasswordMessage('');
+    setPasswordError('');
+  };
+
   const unreadNotifications = notifications.filter(n => n.is_read === '0');
   const notificationCount = unreadNotifications.length;
 
@@ -189,12 +198,15 @@ function SubAdminDashboard({ isPasswordChange = false }) {
               </Link>
             </li>
             <li>
-              <Link to="/subadmin/change-password" className={`sidebar-link ${activeTab === 'change-password' ? 'active' : ''}`} onClick={() => { setActiveTab('change-password'); setShowChangePassword(true); }}>
+              <button 
+                className={`sidebar-link-button ${activeTab === 'change-password' ? 'active' : ''}`} 
+                onClick={() => setShowChangePassword(true)}
+              >
                 <FaCog /> <span>Change Password</span>
-              </Link>
+              </button>
             </li>
             <li>
-              <button onClick={handleLogout} className="sidebar-link">
+              <button onClick={handleLogout} className="sidebar-link-button">
                 <FaSignOutAlt /> <span>Logout</span>
               </button>
             </li>
@@ -271,56 +283,71 @@ function SubAdminDashboard({ isPasswordChange = false }) {
         </header>
 
         <div className="content-area">
-          {showChangePassword ? (
-            <div className="modal-overlay">
-              <div className="modal-content">
-                <h3>Change Password</h3>
-                <form onSubmit={handlePasswordChangeSubmit}>
-                  <div className="form-group">
-                    <label htmlFor="currentPassword">Current Password</label>
-                    <input
-                      type="password"
-                      id="currentPassword"
-                      value={passwordForm.currentPassword}
-                      onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="newPassword">New Password</label>
-                    <input
-                      type="password"
-                      id="newPassword"
-                      value={passwordForm.newPassword}
-                      onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="confirmPassword">Confirm New Password</label>
-                    <input
-                      type="password"
-                      id="confirmPassword"
-                      value={passwordForm.confirmPassword}
-                      onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-                      required
-                    />
-                  </div>
-                  {passwordError && <div className="error-message">{passwordError}</div>}
-                  {passwordMessage && <div className="success-message">{passwordMessage}</div>}
-                  <div className="modal-actions">
-                    <button type="submit" className="submit-btn">Change Password</button>
-                    <button type="button" onClick={() => {setShowChangePassword(false); setActiveTab('dashboard'); }} className="cancel-btn">Cancel</button>
-                  </div>
-                </form>
-              </div>
-            </div>
+          {activeTab === 'dashboard' ? (
+            <SubAdminDashboardOverview />
           ) : (
-            <Outlet /> 
+            <Outlet />
           )}
         </div>
       </div>
+
+      {/* Password Change Modal - Always rendered as an overlay */}
+      {showChangePassword && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Change Password</h3>
+              <button 
+                onClick={handleCancelPasswordChange} 
+                className="close-modal"
+                aria-label="Close password change modal"
+              >
+                <FaTimes />
+              </button>
+            </div>
+            <form onSubmit={handlePasswordChangeSubmit}>
+              <div className="form-group">
+                <label htmlFor="currentPassword">Current Password</label>
+                <input
+                  type="password"
+                  id="currentPassword"
+                  value={passwordForm.currentPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="newPassword">New Password</label>
+                <input
+                  type="password"
+                  id="newPassword"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="confirmPassword">Confirm New Password</label>
+                <input
+                  type="password"
+                  id="confirmPassword"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  required
+                />
+              </div>
+              {passwordError && <div className="error-message">{passwordError}</div>}
+              {passwordMessage && <div className="success-message">{passwordMessage}</div>}
+              <div className="modal-actions">
+                <button type="submit" className="submit-btn">Change Password</button>
+                <button type="button" onClick={handleCancelPasswordChange} className="cancel-btn">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 export default SubAdminDashboard;

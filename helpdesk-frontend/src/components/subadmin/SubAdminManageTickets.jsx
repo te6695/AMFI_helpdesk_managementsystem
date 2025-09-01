@@ -3,7 +3,7 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../App';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config/api';
-import { FaTicketAlt, FaCheckCircle, FaExclamationTriangle, FaInfoCircle, FaUserCheck, FaCheckSquare, FaFilter, FaTimes } from 'react-icons/fa';
+import { FaTicketAlt, FaCheckCircle, FaExclamationTriangle, FaInfoCircle, FaUserCheck, FaCheckSquare, FaFilter, FaTimes, FaShareSquare } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 
 // Custom Modal Component
@@ -38,12 +38,15 @@ function SubAdminManageTickets() {
   const [allTickets, setAllTickets] = useState([]);
   const [filteredTickets, setFilteredTickets] = useState([]);
   const [directorateResolvers, setDirectorateResolvers] = useState([]);
+  const [allSubAdmins, setAllSubAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [selectedResolverForAssignment, setSelectedResolverForAssignment] = useState({});
   const [solutionInput, setSolutionInput] = useState({});
   const [showResolveForm, setShowResolveForm] = useState({});
+  const [showRedirectForm, setShowRedirectForm] = useState({});
+  const [selectedSubAdminForRedirect, setSelectedSubAdminForRedirect] = useState({});
   
   // Filter states
   const [priorityFilter, setPriorityFilter] = useState('all');
@@ -70,6 +73,7 @@ function SubAdminManageTickets() {
       return;
     }
     fetchSubAdminTickets();
+    fetchAllSubAdmins();
   }, [auth.isAuthenticated, auth.user?.id, auth.token, navigate]);
 
   // Apply filters when tickets or filter values change
@@ -132,6 +136,25 @@ function SubAdminManageTickets() {
       setDirectorateResolvers([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAllSubAdmins = async () => {
+    try {
+      const headers = { Authorization: `Bearer ${auth.token}` };
+      const subAdminsRes = await axios.get(`${API_BASE_URL}/users/index.php?roles=sub_admin`, { headers });
+
+      if (subAdminsRes.data.status === 'success') {
+        // Filter out the current sub-admin from the list
+        const filteredSubAdmins = subAdminsRes.data.users.filter(
+          subAdmin => subAdmin.id !== auth.user.id
+        );
+        setAllSubAdmins(filteredSubAdmins);
+      } else {
+        console.error('Failed to fetch sub-admins:', subAdminsRes.data.message);
+      }
+    } catch (err) {
+      console.error("Error fetching sub-admins:", err);
     }
   };
 
@@ -218,6 +241,61 @@ function SubAdminManageTickets() {
         } catch (err) {
           console.error("Resolve ticket error:", err);
           setError(err.response?.data?.message || 'An error occurred during resolution.');
+        } finally {
+          setLoading(false);
+          setShowModal(false);
+        }
+      },
+      () => setShowModal(false),
+      true
+    );
+  };
+
+  const handleRedirectTicket = async (ticketId) => {
+    const targetSubAdminId = selectedSubAdminForRedirect[ticketId];
+    if (!targetSubAdminId) {
+      showCustomModal('Redirection Error', 'Please select a sub-admin to redirect this ticket to.', 'error', () => setShowModal(false));
+      return;
+    }
+
+    showCustomModal(
+      'Confirm Redirection',
+      `Are you sure you want to redirect this ticket to the selected sub-admin? This action cannot be undone.`,
+      'info',
+      async () => {
+        setLoading(true);
+        setError('');
+        setSuccess('');
+
+        try {
+          const response = await axios.put(
+            `${API_BASE_URL}/tickets/index.php?id=${ticketId}`,
+            { 
+              submitted_to: targetSubAdminId,
+              status: 'open', // Reset status to open
+              redirect_notes: `Redirected from sub-admin ${auth.user.username} (ID: ${auth.user.id})`
+            },
+            { headers: { Authorization: `Bearer ${auth.token}` } }
+          );
+
+          if (response.data.status === 'success') {
+            setSuccess(`Ticket ${ticketId} redirected successfully.`);
+            
+            // Send notification to the target sub-admin
+            await axios.post(`${API_BASE_URL}/notifications/index.php`, {
+              message: `A ticket (#${ticketId}) has been redirected to you by ${auth.user.username}`,
+              user_id: targetSubAdminId
+            }, { headers: { Authorization: `Bearer ${auth.token}` } });
+            
+            fetchSubAdminTickets();
+            setSelectedSubAdminForRedirect(prev => ({ ...prev, [ticketId]: '' }));
+            setShowRedirectForm(prev => ({ ...prev, [ticketId]: false }));
+          } else {
+            setError(response.data.message || 'Failed to redirect ticket.');
+          }
+        } catch (err) {
+          console.error("Redirect ticket error:", err);
+          setError(err.response?.data?.message || 'An error occurred during redirection.');
         } finally {
           setLoading(false);
           setShowModal(false);
@@ -410,6 +488,46 @@ function SubAdminManageTickets() {
                               <button
                                 onClick={() => setShowResolveForm(prev => ({ ...prev, [ticket.id]: false }))}
                                 className="cancel-resolve-btn"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                       Redirect Ticket functionality
+                        {!showRedirectForm[ticket.id] ? (
+                          <button
+                            onClick={() => setShowRedirectForm(prev => ({ ...prev, [ticket.id]: true }))}
+                            className="redirect-btn"
+                          >
+                            <FaShareSquare /> Redirect
+                          </button>
+                        ) : (
+                          <div className="redirect-form">
+                            <select
+                              onChange={(e) => setSelectedSubAdminForRedirect(prev => ({ ...prev, [ticket.id]: e.target.value }))}
+                              value={selectedSubAdminForRedirect[ticket.id] || ""}
+                              className="subadmin-select"
+                            >
+                              <option value="" disabled>Select sub-admin to redirect to...</option>
+                              {allSubAdmins.map(subAdmin => (
+                                <option key={subAdmin.id} value={subAdmin.id}>
+                                  {subAdmin.username} - {subAdmin.directorate || 'No Directorate'}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="redirect-actions">
+                              <button
+                                onClick={() => handleRedirectTicket(ticket.id)}
+                                className="submit-redirect-btn"
+                                disabled={loading}
+                              >
+                                Confirm Redirect
+                              </button>
+                              <button
+                                onClick={() => setShowRedirectForm(prev => ({ ...prev, [ticket.id]: false }))}
+                                className="cancel-redirect-btn"
                               >
                                 Cancel
                               </button>

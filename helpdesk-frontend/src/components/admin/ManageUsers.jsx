@@ -2,14 +2,22 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../App';
 import { API_BASE_URL } from '../../config/api';
 import axios from 'axios';
+import { FaCog, FaCheck, FaTimes, FaEdit, FaKey, FaTrash } from 'react-icons/fa';
 
 function ManageUsers() {
   const { auth } = useContext(AuthContext);
   const [users, setUsers] = useState([]);
+  const [roles, setRoles] = useState([]);
   const [editingUser, setEditingUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  // State for role assignment modal
+  const [showRoleModal, setShowRoleModal] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [userRoles, setUserRoles] = useState([]);
+  const [savingRoles, setSavingRoles] = useState(false);
 
   // State for reset password modal
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
@@ -22,6 +30,7 @@ function ManageUsers() {
 
   useEffect(() => {
     fetchUsers();
+    fetchRoles();
   }, []);
 
   // Add password validation function
@@ -37,27 +46,68 @@ function ManageUsers() {
     }
     return '';
   };
-
+  
   const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      setError('');
-      const response = await axios.get(`${API_BASE_URL}/users/index.php`, {
-        headers: {
-          "Authorization": `Bearer ${auth.token}`
-        }
-      });
+  try {
+    setLoading(true);
+    setError('');
+    const response = await axios.get(`${API_BASE_URL}/users/index.php`, {
+      headers: {
+        "Authorization": `Bearer ${auth.token}`
+      }
+    });
 
+    if (response.data.status === 'success') {
+      // For each user, fetch their roles
+      const usersWithRoles = await Promise.all(
+        response.data.users.map(async (user) => {
+          try {
+            const rolesResponse = await axios.get(
+              `${API_BASE_URL}/users/index.php?id=${user.id}&action=get_roles`,
+              { headers: { Authorization: `Bearer ${auth.token}` } }
+            );
+            return {
+              ...user,
+              roles: rolesResponse.data.roles || [user.role]
+            };
+          } catch (err) {
+            console.error(`Failed to fetch roles for user ${user.id}:`, err);
+            return { ...user, roles: [user.role] };
+          }
+        })
+      );
+      
+      setUsers(usersWithRoles);
+    } else {
+      setError(response.data.message || 'Failed to fetch users');
+    }
+  } catch (err) {
+    setError(err.response?.data?.message || 'Connection to server failed');
+    console.error("Fetch users error:", err);
+  } finally {
+    setLoading(false);
+  }
+};
+
+  const fetchRoles = async () => {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/roles/index.php`,
+        { headers: { Authorization: `Bearer ${auth.token}` } }
+      );
+      
       if (response.data.status === 'success') {
-        setUsers(response.data.users || []);
-      } else {
-        setError(response.data.message || 'Failed to fetch users');
+        setRoles(response.data.roles || []);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Connection to server failed');
-      console.error("Fetch users error:", err);
-    } finally {
-      setLoading(false);
+      console.error('Failed to fetch roles:', err);
+      // If roles endpoint doesn't exist, use default roles
+      setRoles([
+        { id: 1, name: 'admin' },
+        { id: 2, name: 'sub_admin' },
+        { id: 3, name: 'resolver' },
+        { id: 4, name: 'user' }
+      ]);
     }
   };
 
@@ -107,7 +157,60 @@ function ManageUsers() {
     setEditingUser(null);
   };
 
-  // Add the missing function
+  // Open role assignment modal
+  const handleAssignRolesClick = (user) => {
+    setSelectedUser(user);
+    // Initialize with current user roles (assuming user.roles is an array of role names)
+    // If your backend doesn't support multiple roles yet, this will need to be adjusted
+    const currentRoles = user.roles || [user.role].filter(Boolean);
+    setUserRoles(currentRoles);
+    setShowRoleModal(true);
+  };
+
+  // Handle role checkbox changes
+  const handleRoleChange = (roleName, isChecked) => {
+    if (isChecked) {
+      setUserRoles(prev => [...prev, roleName]);
+    } else {
+      setUserRoles(prev => prev.filter(role => role !== roleName));
+    }
+  };
+
+  // Save assigned roles
+const handleSaveRoles = async () => {
+  if (!selectedUser) return;
+  
+  setSavingRoles(true);
+  setError('');
+  
+  try {
+    const response = await axios.put(
+      `${API_BASE_URL}/users/index.php?id=${selectedUser.id}&action=update_roles`,
+      { roles: userRoles },
+      { headers: { Authorization: `Bearer ${auth.token}` } }
+    );
+    
+    if (response.data.status === 'success') {
+      setSuccess('User roles updated successfully!');
+      setShowRoleModal(false);
+      
+      // Update the user in the local state with all roles
+      setUsers(users.map(user => 
+        user.id === selectedUser.id 
+          ? { ...user, roles: userRoles } 
+          : user
+      ));
+    } else {
+      setError(response.data.message || 'Failed to update user roles');
+    }
+  } catch (err) {
+    setError(err.response?.data?.message || 'Failed to update user roles');
+    console.error("Update roles error:", err);
+  } finally {
+    setSavingRoles(false);
+  }
+};
+
   const handleResetPasswordClick = (userId, username) => {
     setResetPasswordUserId(userId);
     setResetPasswordUsername(username);
@@ -201,7 +304,20 @@ function ManageUsers() {
     }
   };
 
-  if (loading && !showResetPasswordModal) return <div className="loading-spinner"><div className="spinner"></div>Loading users...</div>;
+  // Format roles for display (show first 2 roles + count of additional roles)
+  const formatRolesForDisplay = (user) => {
+    // If your backend doesn't support multiple roles yet, use the single role
+    const userRoles = user.roles || [user.role].filter(Boolean);
+    
+    if (userRoles.length === 0) return 'No roles';
+    if (userRoles.length <= 2) return userRoles.join(', ');
+    
+    return `${userRoles.slice(0, 2).join(', ')} +${userRoles.length - 2} more`;
+  };
+
+  if (loading && !showResetPasswordModal && !showRoleModal) {
+    return <div className="loading-spinner"><div className="spinner"></div>Loading users...</div>;
+  }
 
   return (
     <div className="manage-users">
@@ -239,7 +355,7 @@ function ManageUsers() {
               />
             </div>
             <div className="form-group">
-              <label htmlFor="role">Role *</label>
+              <label htmlFor="role">Primary Role *</label>
               <select
                 id="role"
                 name="role"
@@ -248,10 +364,9 @@ function ManageUsers() {
                 required
                 className="w-full p-2 border border-gray-300 rounded"
               >
-                <option value="user">User</option>
-                <option value="resolver">Resolver</option>
-                <option value="admin">Admin</option>
-                {/* Add other admin roles if needed */}
+                {roles.map(role => (
+                  <option key={role.id} value={role.name}>{role.name}</option>
+                ))}
               </select>
             </div>
             <div className="flex space-x-2">
@@ -274,7 +389,8 @@ function ManageUsers() {
               <tr>
                 <th>Username</th>
                 <th>Email</th>
-                <th>Role</th>
+                <th>Roles</th>
+                <th>Directorate</th>
                 <th>Created</th>
                 <th>Actions</th>
               </tr>
@@ -284,28 +400,43 @@ function ManageUsers() {
                 <tr key={user.id}>
                   <td>{user.username}</td>
                   <td>{user.email}</td>
-                  <td><span className={`role-badge ${user.role}`}>{user.role}</span></td>
+                  <td>
+                    <span className="roles-display">
+                      {formatRolesForDisplay(user)}
+                    </span>
+                  </td>
+                  <td>{user.directorate || 'N/A'}</td>
                   <td>{new Date(user.created_at).toLocaleDateString()}</td>
                   <td>
                     <div className="action-buttons flex space-x-2">
                       <button 
                         onClick={() => handleEditUser(user)}
                         className="edit-btn"
+                        title="Edit User"
                       >
-                        Edit
+                        <FaEdit />
+                      </button>
+                      <button 
+                        onClick={() => handleAssignRolesClick(user)}
+                        className="role-btn"
+                        title="Assign Roles"
+                      >
+                        <FaCog />
                       </button>
                       <button 
                         onClick={() => handleResetPasswordClick(user.id, user.username)}
                         className="reset-btn"
+                        title="Reset Password"
                       >
-                        Reset Password
+                        <FaKey />
                       </button>
                       <button 
                         onClick={() => handleDeleteUser(user.id, user.username)}
                         className="delete-btn"
                         disabled={user.id === auth.user.id}
+                        title="Delete User"
                       >
-                        Delete
+                        <FaTrash />
                       </button>
                     </div>
                   </td>
@@ -316,12 +447,87 @@ function ManageUsers() {
         </div>
       </div>
 
+      {/* Role Assignment Modal */}
+      {showRoleModal && selectedUser && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h3>Assign Roles to {selectedUser.username}</h3>
+              <button 
+                onClick={() => setShowRoleModal(false)} 
+                className="modal-close-btn"
+              >
+                <FaTimes />
+              </button>
+            </div>
+            
+            <div className="modal-body">
+              <p className="modal-description">
+                Select the roles to assign to this user. A user can have multiple roles.
+              </p>
+              
+              <div className="roles-checkbox-list">
+                {roles.map(role => (
+                  <label key={role.id} className="checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={userRoles.includes(role.name)}
+                      onChange={(e) => handleRoleChange(role.name, e.target.checked)}
+                    />
+                    <span className="checkmark"></span>
+                    {role.name}
+                  </label>
+                ))}
+              </div>
+              
+              {userRoles.length > 0 && (
+                <div className="selected-roles">
+                  <h4>Selected Roles:</h4>
+                  <div className="selected-roles-list">
+                    {userRoles.map(role => (
+                      <span key={role} className="role-tag">
+                        {role}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="modal-actions">
+              <button 
+                onClick={handleSaveRoles}
+                className="submit-btn"
+                disabled={savingRoles || userRoles.length === 0}
+              >
+                {savingRoles ? 'Saving...' : 'Save Changes'}
+              </button>
+              <button 
+                onClick={() => setShowRoleModal(false)}
+                className="cancel-btn"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Reset Password Modal */}
       {showResetPasswordModal && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3>Reset Password for: {resetPasswordUsername}</h3>
-            <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+            <div className="modal-header">
+              <h3>Reset Password for: {resetPasswordUsername}</h3>
+              <button 
+                onClick={() => setShowResetPasswordModal(false)} 
+                className="modal-close-btn"
+              >
+                <FaTimes />
+              </button>
+            </div>
+            
+            <form onSubmit={handleResetPasswordSubmit} className="modal-body">
               <div className="form-group">
                 <label htmlFor="newResetPassword">New Password *</label>
                 <input
@@ -350,23 +556,25 @@ function ManageUsers() {
               </div>
               {resetPasswordError && <div className="error-message">{resetPasswordError}</div>}
               {resetPasswordSuccess && <div className="success-message">{resetPasswordSuccess}</div>}
-              <div className="modal-actions">
-                <button 
-                  type="submit" 
-                  className="submit-btn" 
-                  disabled={loading}
-                >
-                  {loading ? 'Resetting...' : 'Reset Password'}
-                </button>
-                <button 
-                  type="button" 
-                  onClick={() => setShowResetPasswordModal(false)} 
-                  className="cancel-btn"
-                >
-                  Cancel
-                </button>
-              </div>
             </form>
+            
+            <div className="modal-actions">
+              <button 
+                type="submit" 
+                onClick={handleResetPasswordSubmit}
+                className="submit-btn" 
+                disabled={loading}
+              >
+                {loading ? 'Resetting...' : 'Reset Password'}
+              </button>
+              <button 
+                type="button" 
+                onClick={() => setShowResetPasswordModal(false)} 
+                className="cancel-btn"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

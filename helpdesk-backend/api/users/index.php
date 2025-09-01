@@ -1,5 +1,3 @@
-
-
 <?php
 // api/users/index.php
 
@@ -57,7 +55,8 @@ try {
     $requestMethod = $_SERVER["REQUEST_METHOD"];
 
     // Define ADMIN_ROLES in PHP for authorization checks (mirroring frontend)
-    $adminRoles = ["admin", "boardadmin", "ceoadmin", "cooadmin", "ccoadmin", "IRadmin", "ITadmin", "operatonadmin", "marketadmin", "branchadmin", "financeadmin", "planandstrategyadmin", "shareadmin", "lawadmin", "riskadmin", "auditadmin"];
+    // FIX: Add "sub_admin" to the admin roles array.
+    $adminRoles = ["admin", "boardadmin", "ceoadmin", "cooadmin", "ccoadmin", "IRadmin", "ITadmin", "operatonadmin", "marketadmin", "branchadmin", "financeadmin", "planandstrategyadmin", "shareadmin", "lawadmin", "riskadmin", "auditadmin", "sub_admin"];
     $validRoles = array_merge($adminRoles, ["resolver", "user"]); 
 
     switch ($requestMethod) {

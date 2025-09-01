@@ -2,305 +2,310 @@ import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../App';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config/api';
-import { TicketStatusChart, TicketPriorityChart, TicketCategoryChart } from './Charts'; // Relative path fix
-import { ADMIN_ROLES } from '../../utils/roleUtils'; // Import ADMIN_ROLES
-import { FaChartLine, FaListAlt } from 'react-icons/fa';
+import { FaFilter, FaSearch, FaTable } from 'react-icons/fa';
 
 function ManageTickets() {
-  const { auth } = useContext(AuthContext);
-  const [tickets, setTickets] = useState([]);
-  const [resolvers, setResolvers] = useState([]); // List of resolvers/sub-admins for assignment dropdown
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [selectedResolvers, setSelectedResolvers] = useState({}); // State to manage selected resolver for each ticket dropdown
-  const [resolutionStats, setResolutionStats] = useState({ daily: [], weekly: [], monthly: [] }); // Updated state for daily stats
+  const { auth } = useContext(AuthContext);
+  const [tickets, setTickets] = useState([]);
+  const [filteredTickets, setFilteredTickets] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  
+  // Filter states
+  const [filters, setFilters] = useState({
+    status: '',
+    directorate: '',
+    category: '',
+    priority: '',
+    dateFrom: '',
+    dateTo: ''
+  });
+  const [searchTerm, setSearchTerm] = useState('');
 
-  // Determine if the current user is the top-level 'admin' or another admin role (sub-admin)
-  const isTopLevelAdmin = auth.user.role === 'admin';
-  const isSubAdminOrResolver = ADMIN_ROLES.includes(auth.user.role) || auth.user.role === 'resolver';
+  useEffect(() => {
+    if (!auth.isAuthenticated) {
+      setError('You are not authorized to view this page.');
+      setLoading(false);
+      return;
+    }
+    
+    fetchData();
+  }, [auth.isAuthenticated, auth.token]);
 
-  useEffect(() => {
-    if (!auth.isAuthenticated) {
-      setError('You are not authorized to view this page.');
-      setLoading(false);
-      return;
-    }
-    
-    // Authorization check: Only 'admin', sub-admins, or resolvers can access this component
-    if (!isTopLevelAdmin && !isSubAdminOrResolver) {
-        setError('Forbidden: Your role does not have access to manage or view ticket reports.');
-        setLoading(false);
-        return;
-    }
+  useEffect(() => {
+    applyFilters();
+  }, [filters, searchTerm, tickets, users]);
 
-    fetchData();
-  }, [auth.isAuthenticated, auth.token, auth.user?.role]);
+  const fetchData = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const headers = { Authorization: `Bearer ${auth.token}` };
+      
+      const [ticketsRes, usersRes] = await Promise.all([
+        axios.get(`${API_BASE_URL}/tickets/index.php`, { headers }),
+        axios.get(`${API_BASE_URL}/users/index.php`, { headers })
+      ]);
 
-  const fetchData = async () => {
-    setLoading(true);
-    setError('');
-    setSuccess('');
-    try {
-      const headers = { Authorization: `Bearer ${auth.token}` };
-      
-      const ticketsRes = await axios.get(`${API_BASE_URL}/tickets/index.php`, { headers });
+      if (ticketsRes.data.status === 'success') {
+        setTickets(ticketsRes.data.tickets || []);
+      } else {
+        setError(ticketsRes.data.message || 'Failed to fetch tickets.');
+        setTickets([]);
+      }
 
-      if (ticketsRes.data.status === 'success') {
-        setTickets(ticketsRes.data.tickets || []);
-      } else {
-        setError(ticketsRes.data.message || 'Failed to fetch tickets.');
-        setTickets([]);
-      }
+      if (usersRes.data.status === 'success') {
+        setUsers(usersRes.data.users || []);
+      } else {
+        setError(prev => prev + (prev ? ' | ' : '') + (usersRes.data.message || 'Failed to fetch users.'));
+        setUsers([]);
+      }
 
-      if (!isTopLevelAdmin) {
-        const assignableRoles = ADMIN_ROLES.filter(role => role !== 'admin').join(',');
-        const resolversRes = await axios.get(`${API_BASE_URL}/users/index.php?roles=resolver,${assignableRoles}`, { headers });
+    } catch (err) {
+      console.error("Fetch data error:", err);
+      setError(err.response?.data?.message || 'An error occurred while fetching data.');
+      setTickets([]);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        if (resolversRes.data.status === 'success') {
-          setResolvers(resolversRes.data.users || []);
-        } else {
-          setError(prev => prev + (prev ? ' | ' : '') + (resolversRes.data.message || 'Failed to fetch assignable users.'));
-          setResolvers([]);
-        }
-      }
+  // Function to get submitter's directorate and name
+  const getSubmitterInfo = (ticket) => {
+    if (!ticket.submitted_by) return { directorate: 'Unknown', name: 'N/A' };
+    
+    const submitter = users.find(user => user.id === ticket.submitted_by);
+    return { 
+      directorate: submitter?.directorate || 'Unknown', 
+      name: submitter?.username || 'N/A' 
+    };
+  };
 
-      if (isTopLevelAdmin) {
-        try {
-          // API call to fetch resolution statistics
-          const statsRes = await axios.get(`${API_BASE_URL}/tickets/resolution_stats.php`, { headers });
-          if (statsRes.data.status === 'success' && statsRes.data.stats) {
-             setResolutionStats(statsRes.data.stats);
-          } else {
-             setError(prev => prev + (prev ? ' | ' : '') + (statsRes.data.message || 'Failed to fetch resolution stats.'));
-             setResolutionStats({ daily: [], weekly: [], monthly: [] }); // Reset on error
-          }
-        } catch (statsErr) {
-          console.error("Fetch resolution stats error:", statsErr);
-          setError(prev => prev + (prev ? ' | ' : '') + (statsErr.response?.data?.message || 'Failed to fetch resolution statistics.'));
-          setResolutionStats({ daily: [], weekly: [], monthly: [] }); // Reset on error
-        }
-      }
+  // Function to format dates and times
+  const formatDateTime = (timestamp) => {
+    if (!timestamp) return 'N/A';
+    const date = new Date(timestamp);
+    return `${date.toLocaleDateString()} ${date.toLocaleTimeString()}`;
+  };
 
-    } catch (err) {
-      console.error("Fetch data error:", err);
-      setError(err.response?.data?.message || 'An error occurred while fetching data.');
-      setTickets([]);
-      setResolvers([]);
-      setResolutionStats({ daily: [], weekly: [], monthly: [] }); // Reset on main fetch error
-    } finally {
-      setLoading(false);
-    }
-  };
+  const applyFilters = () => {
+    let result = [...tickets];
+    
+    // Apply status filter
+    if (filters.status) {
+      result = result.filter(ticket => ticket.status === filters.status);
+    }
+    
+    // Apply directorate filter - based on submitter's directorate
+    if (filters.directorate) {
+      result = result.filter(ticket => getSubmitterInfo(ticket).directorate === filters.directorate);
+    }
+    
+    // Apply category filter
+    if (filters.category) {
+      result = result.filter(ticket => ticket.category === filters.category);
+    }
+    
+    // Apply priority filter
+    if (filters.priority) {
+      result = result.filter(ticket => ticket.priority === filters.priority);
+    }
+    
+    // Apply date range filter on creation date
+    if (filters.dateFrom) {
+      result = result.filter(ticket => new Date(ticket.created_at) >= new Date(filters.dateFrom));
+    }
+    
+    if (filters.dateTo) {
+      const toDate = new Date(filters.dateTo);
+      toDate.setDate(toDate.getDate() + 1);
+      result = result.filter(ticket => new Date(ticket.created_at) < toDate);
+    }
+    
+    // Apply search term
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(ticket => 
+        ticket.title.toLowerCase().includes(term) || 
+        (ticket.ticket_number && ticket.ticket_number.toLowerCase().includes(term)) ||
+        (ticket.subject && ticket.subject.toLowerCase().includes(term)) ||
+        (getSubmitterInfo(ticket).name.toLowerCase().includes(term)) ||
+        (getSubmitterInfo(ticket).directorate.toLowerCase().includes(term))
+      );
+    }
+    
+    setFilteredTickets(result);
+  };
 
-  const assignTicket = async (ticketId) => {
-    const resolverId = selectedResolvers[ticketId];
-    if (!resolverId) {
-      setError('Please select a user to assign the ticket.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-    setSuccess('');
-    try {
-      const response = await axios.put(
-        `${API_BASE_URL}/tickets/index.php?id=${ticketId}`,
-        { assigned_to: resolverId },
-        { headers: { Authorization: `Bearer ${auth.token}` } }
-      );
+  const handleFilterChange = (e) => {
+    const { name, value } = e.target;
+    setFilters(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
 
-      if (response.data.status === 'success') {
-        setSuccess(`Ticket ${ticketId} assigned successfully!`);
-        fetchData(); // Re-fetch tickets to update status
-        setSelectedResolvers(prev => ({ ...prev, [ticket.id]: '' })); // Clear selected resolver
-      } else {
-        setError(response.data.message || 'Failed to assign ticket.');
-      }
-    } catch (err) {
-      console.error("Assign ticket error:", err);
-      setError(err.response?.data?.message || 'An error occurred while assigning the ticket.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleSearchChange = (e) => {
+    setSearchTerm(e.target.value);
+  };
 
-  if (loading) return <div className="loading">Loading tickets...</div>;
+  const clearFilters = () => {
+    setFilters({
+      status: '',
+      directorate: '',
+      category: '',
+      priority: '',
+      dateFrom: '',
+      dateTo: ''
+    });
+    setSearchTerm('');
+  };
 
-  return (
-    <div className="manage-tickets-container card">
-      {error && <div className="error-message">{error}</div>}
-      {success && <div className="success-message">{success}</div>}
+  if (loading) return <div className="loading">Loading reports...</div>;
 
-      {isTopLevelAdmin ? (
-        // Top-level 'admin' View: Show statistical reports
-        <div className="admin-reports-view">
-          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2"><FaChartLine /> Ticket Resolution Reports</h2>
-          
-          <div className="stats-section mb-8">
-            <h3 className="text-xl font-medium mb-4">Daily Resolution Overview</h3>
-            {resolutionStats.daily.length > 0 ? (
-              <table className="min-w-full bg-white border border-gray-200 rounded-lg shadow-sm">
-                <thead>
-                  <tr>
-                    <th className="py-2 px-4 border-b text-left">Date</th>
-                    <th className="py-2 px-4 border-b text-left">Tickets Submitted</th>
-                    <th className="py-2 px-4 border-b text-left">Tickets Resolved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resolutionStats.daily.map((data, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="py-2 px-4 border-b">{data.date}</td>
-                      <td className="py-2 px-4 border-b">{data.submitted}</td>
-                      <td className="py-2 px-4 border-b">{data.resolved}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-gray-600">No daily resolution data available.</p>
-            )}
+  // Get unique values for filter dropdowns
+  const statusOptions = [...new Set(tickets.map(ticket => ticket.status))];
+  const directorateOptions = [...new Set(users.map(user => user.directorate).filter(Boolean))];
+  const categoryOptions = [...new Set(tickets.map(ticket => ticket.category))];
+  const priorityOptions = [...new Set(tickets.map(ticket => ticket.priority))];
 
-            <h3 className="text-xl font-medium mb-4 mt-8">Weekly Resolution Overview</h3>
-            {resolutionStats.weekly.length > 0 ? (
-              <table className="min-w-full bg-white border border-gray-200 rounded-lg shadow-sm">
-                <thead>
-                  <tr>
-                    <th className="py-2 px-4 border-b text-left">Week</th>
-                    <th className="py-2 px-4 border-b text-left">Tickets Submitted</th>
-                    <th className="py-2 px-4 border-b text-left">Tickets Resolved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resolutionStats.weekly.map((data, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="py-2 px-4 border-b">{data.week}</td>
-                      <td className="py-2 px-4 border-b">{data.submitted}</td>
-                      <td className="py-2 px-4 border-b">{data.resolved}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-gray-600">No weekly resolution data available.</p>
-            )}
+  return (
+    <div className="ticket-reports-container card">
+      {error && <div className="error-message">{error}</div>}
 
-            <h3 className="text-xl font-medium mb-4 mt-8">Monthly Resolution Overview</h3>
-            {resolutionStats.monthly.length > 0 ? (
-              <table className="min-w-full bg-white border border-gray-200 rounded-lg shadow-sm">
-                <thead>
-                  <tr>
-                    <th className="py-2 px-4 border-b text-left">Month</th>
-                    <th className="py-2 px-4 border-b text-left">Tickets Submitted</th>
-                    <th className="py-2 px-4 border-b text-left">Tickets Resolved</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {resolutionStats.monthly.map((data, index) => (
-                    <tr key={index} className="hover:bg-gray-50">
-                      <td className="py-2 px-4 border-b">{data.month}</td>
-                      <td className="py-2 px-4 border-b">{data.submitted}</td>
-                      <td className="py-2 px-4 border-b">{data.resolved}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-gray-600">No monthly resolution data available.</p>
-            )}
-          </div>
-          
-          {/* Charts for overall ticket distribution */}
-          <div className="charts-section mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="chart-card card">
-              <TicketStatusChart tickets={tickets} />
-            </div>
-            <div className="chart-card card">
-              <TicketPriorityChart tickets={tickets} />
-            </div>
-            <div className="chart-card card">
-              <TicketCategoryChart tickets={tickets} />
-            </div>
-          </div>
-        </div>
-      ) : (
-        // Sub-Admin/Resolver View: Show assignable tickets table
-        <div className="tickets-table-container">
-          <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2"><FaListAlt /> All Tickets (Management)</h2>
-          <table className="min-w-full bg-white border border-gray-200 rounded-lg shadow-sm">
-            <thead>
-              <tr>
-                <th className="py-2 px-4 border-b text-left">ID</th>
-                <th className="py-2 px-4 border-b text-left">Subject</th>
-                <th className="py-2 px-4 border-b text-left">Category</th>
-                <th className="py-2 px-4 border-b text-left">Priority</th>
-                <th className="py-2 px-4 border-b text-left">Status</th>
-                <th className="py-2 px-4 border-b text-left">Submitted By</th>
-                <th className="py-2 px-4 border-b text-left">Assigned To</th>
-                {isSubAdminOrResolver && ( 
-                  <th className="py-2 px-4 border-b text-left">Actions</th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {tickets.length === 0 ? (
-                <tr>
-                  <td colSpan={isSubAdminOrResolver ? 8 : 7} className="text-center py-4 text-gray-600">No tickets found.</td>
-                </tr>
-              ) : (
-                tickets.map(ticket => (
-                  <tr key={ticket.id} className="hover:bg-gray-50">
-                    <td className="py-2 px-4 border-b">{ticket.id}</td>
-                    <td className="py-2 px-4 border-b">{ticket.subject}</td>
-                    <td className="py-2 px-4 border-b">{ticket.category}</td>
-                    <td className="py-2 px-4 border-b"><span className={`priority-badge ${ticket.priority}`}>{ticket.priority}</span></td>
-                    <td className="py-2 px-4 border-b"><span className={`status-badge ${ticket.status}`}>{ticket.status}</span></td>
-                    <td className="py-2 px-4 border-b">{ticket.submitted_by_name || 'N/A'}</td>
-                    <td className="py-2 px-4 border-b">{ticket.assigned_to_name || 'Unassigned'}</td>
-                    {isSubAdminOrResolver && ( 
-                      <td className="py-2 px-4 border-b">
-                        {ticket.status === 'open' && (
-                          <div className="flex items-center space-x-2">
-                            <select
-                              onChange={(e) => setSelectedResolvers(prev => ({ ...prev, [ticket.id]: e.target.value }))}
-                              value={selectedResolvers[ticket.id] || ""} 
-                              className="p-1 border rounded"
-                            >
-                              <option value="" disabled>Assign to...</option>
-                              {resolvers.map(resolver => (
-                                <option key={resolver.id} value={resolver.id}>
-                                  {resolver.username} ({resolver.role})
-                                </option>
-                              ))}
-                            </select>
-                            {selectedResolvers[ticket.id] && ( 
-                              <button
-                                onClick={() => assignTicket(ticket.id)}
-                                className="bg-green-500 hover:bg-green-700 text-white text-sm py-1 px-3 rounded"
-                                disabled={loading} 
-                              >
-                                Assign
-                              </button>
-                            )}
-                          </div>
-                        )}
-                        {ticket.status === 'assigned' && (
-                          <span className="text-gray-700">Assigned</span>
-                        )}
-                        {ticket.status === 'resolved' && (
-                          <span className="text-green-600">Resolved</span>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
+      <h2 className="text-2xl font-semibold mb-6 flex items-center gap-2"><FaTable /> Ticket Report Details</h2>
+
+      {/* Filters Section */}
+      <div className="filters-section card mb-6">
+        <h3 className="flex items-center mb-4">
+          <FaFilter className="mr-2" /> Filters
+        </h3>
+        
+        <div className="filters-row flex flex-wrap gap-4 mb-4">
+          <div className="filter-item">
+            <label>Status</label>
+            <select name="status" value={filters.status} onChange={handleFilterChange}>
+              <option value="">All Statuses</option>
+              {statusOptions.map(status => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="filter-item">
+            <label>Directorate</label>
+            <select name="directorate" value={filters.directorate} onChange={handleFilterChange}>
+              <option value="">All Directorates</option>
+              {directorateOptions.map(directorate => (
+                <option key={directorate} value={directorate}>{directorate}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="filter-item">
+            <label>Category</label>
+            <select name="category" value={filters.category} onChange={handleFilterChange}>
+              <option value="">All Categories</option>
+              {categoryOptions.map(category => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="filter-item">
+            <label>Priority</label>
+            <select name="priority" value={filters.priority} onChange={handleFilterChange}>
+              <option value="">All Priorities</option>
+              {priorityOptions.map(priority => (
+                <option key={priority} value={priority}>{priority}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        
+        <div className="filters-row flex flex-wrap gap-4 mb-4">
+          <div className="filter-item">
+            <label>Submitted From</label>
+            <input 
+              type="date" 
+              name="dateFrom" 
+              value={filters.dateFrom} 
+              onChange={handleFilterChange} 
+            />
+          </div>
+          
+          <div className="filter-item">
+            <label>Submitted To</label>
+            <input 
+              type="date" 
+              name="dateTo" 
+              value={filters.dateTo} 
+              onChange={handleFilterChange} 
+            />
+          </div>
+          
+          <div className="filter-item search-item">            
+            <div className="search-input-container">
+              <FaSearch className="search-icon" />
+              <input 
+                type="text" 
+                placeholder="Search tickets..." 
+                value={searchTerm} 
+                onChange={handleSearchChange} 
+              />
+          </div>
+          </div>
+          
+          <div className="filter-item clear-item">
+            <label>&nbsp;</label>
+            <button onClick={clearFilters} className="clear-filters-btn">
+              Clear All
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Ticket Details Table */}
+      <div className="table-responsive">
+        <table className="min-w-full bg-white border border-gray-200 rounded-lg shadow-sm">
+          <thead>
+            <tr>
+              <th className="py-2 px-4 border-b text-left">Ticket ID</th>
+              <th className="py-2 px-4 border-b text-left">Subject</th>
+              <th className="py-2 px-4 border-b text-left">Category</th>
+              <th className="py-2 px-4 border-b text-left">Priority</th>
+              <th className="py-2 px-4 border-b text-left">Status</th>
+              <th className="py-2 px-4 border-b text-left">Directorate</th>
+              <th className="py-2 px-4 border-b text-left">Submitted Time</th>
+              <th className="py-2 px-4 border-b text-left">Resolved Time</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredTickets.length === 0 ? (
+              <tr>
+                <td colSpan="8" className="text-center py-4 text-gray-600">No tickets found.</td>
+              </tr>
+            ) : (
+              filteredTickets.map(ticket => (
+                <tr key={ticket.id} className="hover:bg-gray-50">
+                  <td className="py-2 px-4 border-b">{ticket.id}</td>
+                  <td className="py-2 px-4 border-b">{ticket.subject}</td>
+                  <td className="py-2 px-4 border-b">{ticket.category}</td>
+                  <td className="py-2 px-4 border-b"><span className={`priority-badge ${ticket.priority}`}>{ticket.priority}</span></td>
+                  <td className="py-2 px-4 border-b"><span className={`status-badge ${ticket.status}`}>{ticket.status}</span></td>
+                  <td className="py-2 px-4 border-b">{getSubmitterInfo(ticket).directorate}</td>
+                  <td className="py-2 px-4 border-b">{formatDateTime(ticket.created_at)}</td>
+                  <td className="py-2 px-4 border-b">{ticket.resolved_at ? formatDateTime(ticket.resolved_at) : 'Not Resolved'}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 export default ManageTickets;

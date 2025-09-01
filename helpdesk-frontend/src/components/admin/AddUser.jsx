@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { AuthContext } from '../../App';
 import { API_BASE_URL } from '../../config/api';
 import axios from 'axios';
@@ -13,9 +13,38 @@ function AddUser() {
     role: 'user',
     directorate: '' // NEW STATE FOR DIRECTORATE
   });
+  const [directorates, setDirectorates] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadingDirectorates, setLoadingDirectorates] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    fetchDirectorates();
+  }, []);
+
+  const fetchDirectorates = async () => {
+    try {
+      setLoadingDirectorates(true);
+      const response = await axios.get(`${API_BASE_URL}/directorates/index.php`, {
+        headers: {
+          "Authorization": `Bearer ${auth.token}`
+        }
+      });
+
+      if (response.data.status === 'success') {
+        setDirectorates(response.data.directorates || []);
+      } else {
+        console.error('Failed to fetch directorates:', response.data.message);
+      }
+    } catch (err) {
+      console.error("Fetch directorates error:", err);
+      // If directorates endpoint doesn't exist, use empty array
+      setDirectorates([]);
+    } finally {
+      setLoadingDirectorates(false);
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -102,20 +131,33 @@ function AddUser() {
             required
             className="w-full p-2 border border-gray-300 rounded"
           />
+          <div className="text-sm text-gray-500 mt-1">
+            Password must be at least 8 characters with uppercase letter and number
+          </div>
         </div>
-        {/* NEW FORM GROUP FOR DIRECTORATE */}
+        {/* UPDATED FORM GROUP FOR DIRECTORATE DROPDOWN */}
         <div className="form-group">
           <label htmlFor="directorate">Directorate</label>
-          <input
-            type="text"
-            id="directorate"
-            name="directorate"
-            value={newUser.directorate}
-            onChange={handleChange}
-            className="w-full p-2 border border-gray-300 rounded"
-          />
+          {loadingDirectorates ? (
+            <div className="loading-text">Loading directorates...</div>
+          ) : (
+            <select
+              id="directorate"
+              name="directorate"
+              value={newUser.directorate}
+              onChange={handleChange}
+              className="w-full p-2 border border-gray-300 rounded"
+            >
+              <option value="">Select a directorate</option>
+              {directorates.map(directorate => (
+                <option key={directorate.id} value={directorate.name}>
+                  {directorate.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
-        {/* END NEW FORM GROUP */}
+        {/* END UPDATED FORM GROUP */}
         <div className="form-group">
           <label htmlFor="role">Role *</label>
           <select

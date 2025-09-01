@@ -194,6 +194,7 @@ function ResolverNewTicket() {
           <textarea
             id="description"
             name="description"
+            placeholder='Describe your issue in detail.................'
             value={formData.description}
             onChange={handleChange}
             rows="5"

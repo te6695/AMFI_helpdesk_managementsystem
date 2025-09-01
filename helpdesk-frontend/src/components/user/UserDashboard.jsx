@@ -1,10 +1,9 @@
-// components/user/UserDashboard.jsx
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../App'; 
 import { Link, Outlet, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config/api'; 
-import { FaBars, FaHome, FaPlusCircle, FaTicketAlt, FaBell, FaSignOutAlt, FaUserCircle, FaCog } from 'react-icons/fa'; 
+import { FaBars, FaHome, FaPlusCircle, FaTicketAlt, FaBell, FaSignOutAlt, FaUserCircle, FaCog, FaTimes, FaSync, FaUserCog } from 'react-icons/fa'; 
 import { Pie, Bar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -16,7 +15,6 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
-
 
 // Register ChartJS components
 ChartJS.register(
@@ -30,14 +28,16 @@ ChartJS.register(
 );
 
 function UserDashboard() {
-  const { auth, logout } = useContext(AuthContext);
+  const { auth, logout, switchRole } = useContext(AuthContext);
   const [tickets, setTickets] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [userRoles, setUserRoles] = useState([]);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showRoleSelector, setShowRoleSelector] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     newPassword: '',
@@ -55,15 +55,8 @@ function UserDashboard() {
       return;
     }
 
-    // Redirect if user is not a regular user (shouldn't happen with proper routing, but as a safeguard)
-    if (auth.user.role !== 'user') {
-      // For this specific case, if they are admin/resolver, they'll go to their respective dashboard
-      // Otherwise, redirect to the general dashboard
-      navigate('/dashboard', { replace: true });
-      return;
-    }
-
     fetchUserData();
+    fetchUserRoles();
   }, [auth, navigate]);
 
   // Function to fetch all user data (tickets, notifications)
@@ -80,7 +73,8 @@ function UserDashboard() {
         axios.get(`${API_BASE_URL}/tickets/index.php?user_id=${auth.user.id}`, {
           headers: { Authorization: `Bearer ${auth.token}` }
         }),
-        axios.get(`${API_BASE_URL}/notifications/index.php?user_id=${auth.user.id}`, {
+        // Fetch only unread notifications
+        axios.get(`${API_BASE_URL}/notifications/index.php?user_id=${auth.user.id}&unread=true`, {
           headers: { Authorization: `Bearer ${auth.token}` }
         }),
       ]);
@@ -95,14 +89,81 @@ function UserDashboard() {
     }
   };
 
-  // Function to mark all notifications as read
-  const markAllAsRead = async () => {
+  // Function to fetch user's assigned roles
+  const fetchUserRoles = async () => {
     try {
-      await axios.post(`${API_BASE_URL}/notifications/index.php`, { userId: auth.user.id }, {
+      const response = await axios.get(
+        `${API_BASE_URL}/users/index.php?id=${auth.user.id}&action=get_roles`,
+        { headers: { Authorization: `Bearer ${auth.token}` } }
+      );
+      
+      if (response.data.status === 'success') {
+        // If backend supports multiple roles
+        setUserRoles(response.data.roles || [auth.user.role]);
+      } else {
+        // Fallback to current role if endpoint not available
+        setUserRoles([auth.user.role]);
+      }
+    } catch (err) {
+      console.error('Error fetching user roles:', err);
+      // Fallback to current role
+      setUserRoles([auth.user.role]);
+    }
+  };
+
+  // Function to handle role switching
+  const handleRoleSwitch = (role) => {
+    switchRole(role);
+    setShowRoleSelector(false);
+    // Refresh data for the new role context
+    fetchUserData();
+  };
+
+  // Function to fetch only unread notifications
+  const fetchUnreadNotifications = async () => {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/notifications/index.php?user_id=${auth.user.id}&unread=true`,
+        { headers: { Authorization: `Bearer ${auth.token}` } }
+      );
+      
+      if (response.data.status === 'success') {
+        setNotifications(response.data.notifications || []);
+      }
+    } catch (err) {
+      console.error('Error fetching unread notifications:', err);
+    }
+  };
+
+  // Function to mark a single notification as read
+  const markNotificationAsRead = async (notificationId) => {
+    try {
+      await axios.put(`${API_BASE_URL}/notifications/index.php?id=${notificationId}`, {}, {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
-      // Update the local state to reflect changes
-      setNotifications(notifications.map(n => ({ ...n, is_read: '1' })));
+      
+      // Remove the notification from the local state (only unread notifications are shown)
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
+    }
+  };
+
+  // Function to mark all notifications as read and close the dropdown
+  const markAllAsRead = async () => {
+    try {
+      await axios.post(`${API_BASE_URL}/notifications/index.php`, { 
+        userId: auth.user.id,
+        markAllRead: true 
+      }, {
+        headers: { Authorization: `Bearer ${auth.token}` }
+      });
+      
+      // Clear all notifications from the local state
+      setNotifications([]);
+      
+      // Close the notification dropdown after marking as read
+      setShowNotifications(false);
     } catch (err) {
       console.error('Failed to mark notifications as read:', err);
     }
@@ -218,12 +279,12 @@ function UserDashboard() {
               </Link>
             </li>
             <li>
-              <button onClick={() => setShowChangePassword(true)} className="sidebar-link">
+              <button onClick={() => setShowChangePassword(true)} className="sidebar-link-button">
                 <FaCog /> <span>Change Password</span>
               </button>
             </li>
             <li>
-              <button onClick={logout} className="sidebar-link">
+              <button onClick={logout} className="sidebar-link-button">
                 <FaSignOutAlt /> <span>Logout</span>
               </button>
             </li>
@@ -235,33 +296,97 @@ function UserDashboard() {
       <div className="main-content-wrapper">
         {/* Header */}
         <div className="header">
+          {/* Role Selector */}
+          <div className="role-selector-container">
+            <button 
+              className="role-selector-btn"
+              onClick={() => setShowRoleSelector(!showRoleSelector)}
+              title="Switch Role"
+            >
+              <FaUserCog />
+              <span>Acting as: {auth.user.currentRole || auth.user.role}</span>
+              <FaSync />
+            </button>
+            
+            {showRoleSelector && (
+              <div className="role-selector-dropdown">
+                <div className="role-selector-header">
+                  <h4>Select Role to Act As</h4>
+                  <button onClick={() => setShowRoleSelector(false)} className="close-role-selector">
+                    <FaTimes />
+                  </button>
+                </div>
+                <div className="role-list">
+                  {userRoles.map(role => (
+                    <button
+                      key={role}
+                      className={`role-option ${(auth.user.currentRole || auth.user.role) === role ? 'active' : ''}`}
+                      onClick={() => handleRoleSwitch(role)}
+                    >
+                      {role}
+                      {(auth.user.currentRole || auth.user.role) === role && (
+                        <span className="current-role-badge">Current</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="notification-container">
             <div className="notification-icon" onClick={() => setShowNotifications(!showNotifications)}>
               <FaBell />
-              {notifications.filter(n => n.is_read === '0').length > 0 && (
+              {notifications.length > 0 && (
                 <span className="notification-badge">
-                  {notifications.filter(n => n.is_read === '0').length}
+                  {notifications.length}
                 </span>
               )}
             </div>
             {showNotifications && (
               <div className="notification-dropdown">
-                <h4>Notifications</h4>
-                {notifications.length > 0 ? (
-                  <>
-                    {notifications.map((n) => (
-                      <div key={n.id} className={`notification-item ${n.is_read === '0' ? 'unread' : ''}`}>
-                        <p>{n.message}</p>
-                      </div>
-                    ))}
-                    <button onClick={markAllAsRead} className="mark-read-btn">Mark All as Read</button>
-                  </>
+                <div className="notification-header">
+                  <h4>Notifications</h4>
+                  <button onClick={() => setShowNotifications(false)} className="close-notifications">
+                    <FaTimes />
+                  </button>
+                </div>
+                {notifications.length === 0 ? (
+                  <p className="no-notifications">No new notifications</p>
                 ) : (
-                  <p>No new notifications.</p>
+                  <>
+                    <div className="notification-list">
+                      {notifications.map((notification) => (
+                        <div key={notification.id} className="notification-item unread">
+                          <div className="notification-content">
+                            <p>{notification.message}</p>
+                            <span className="notification-time">
+                              {new Date(notification.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                          <div className="notification-actions">
+                            <button 
+                              onClick={() => markNotificationAsRead(notification.id)}
+                              className="mark-read-btn"
+                              title="Mark as read"
+                            >
+                              ✓
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="notification-footer">
+                      <button onClick={markAllAsRead} className="mark-all-read-btn">
+                        Mark All as Read
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
             )}
           </div>
+          
           <div className="user-info">
             <span>{auth.user?.username || 'User'}</span>
             <FaUserCircle />
@@ -273,8 +398,8 @@ function UserDashboard() {
           {error && <div className="error-message">{error}</div>}
           {activeTab === 'dashboard' && (
             <div className="user-dashboard-overview card">
-              <h2>User Dashboard</h2>
-              <p className="welcome-message">Welcome, {auth.user.username}!</p>
+              <h2>User Dashboard - Acting as: {auth.user.currentRole || auth.user.role}</h2>
+              <p className="welcome-message">Welcome, {auth.user.username}! You have {userRoles.length} assigned role(s).</p>
 
               <div className="stats-cards">
                 <div className="stat-card card">
